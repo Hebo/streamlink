@@ -181,6 +181,7 @@ class TwitchAPI(object):
 
     def __init__(self, session):
         self.session = session
+        self.private_oauth_token = None
 
     def _call(self, method="GET", subdomain="api", path="/", headers=None, private=False, data=None, **params):
         url = "https://{0}.twitch.tv{1}".format(subdomain, path)
@@ -188,6 +189,11 @@ class TwitchAPI(object):
         headers.update({
             "Client-ID": self.TWITCH_CLIENT_ID if not private else self.TWITCH_CLIENT_ID_PRIVATE
         })
+
+        if self.private_oauth_token and private:
+            headers.update({
+                "Authorization": "OAuth {}".format(self.private_oauth_token)
+            })
 
         return self.session.http.request(method, url, data=data, params=params, headers=headers)
 
@@ -447,7 +453,14 @@ class Twitch(Plugin):
             Please refer to the player's own documentation for the required parameters and its configuration.
             Player parameters can be set via Streamlink's --player or --player-args parameters.
             """.format(live_edge=LOW_LATENCY_MAX_LIVE_EDGE)
-        )
+        ),
+        PluginArgument(
+            "private-oauth-token",
+            sensitive=True,
+            help="""
+            An OAuth token to use for Twitch authentication.
+            """
+        ),
     )
 
     _re_url = re.compile(r"""
@@ -604,6 +617,14 @@ class Twitch(Plugin):
 
         return False
 
+    def _authenticate(self):
+        if self.api.private_oauth_token:
+            return
+
+        oauth_token = self.options.get("private_oauth_token")
+        if oauth_token:
+            self.api.private_oauth_token = oauth_token
+
     def _get_hls_streams_live(self):
         if self._switch_to_hosted_channel():
             return
@@ -612,6 +633,7 @@ class Twitch(Plugin):
 
         # only get the token once the channel has been resolved
         log.debug("Getting live HLS streams for {0}".format(self.channel))
+        self._authenticate()
         sig, token, restricted_bitrates = self._access_token(True, self.channel)
         url = self.usher.channel(self.channel, sig=sig, token=token, fast_bread=True)
 
@@ -619,6 +641,7 @@ class Twitch(Plugin):
 
     def _get_hls_streams_video(self):
         log.debug("Getting video HLS streams for {0}".format(self.channel))
+        self._authenticate()
         sig, token, restricted_bitrates = self._access_token(False, self.video_id)
         url = self.usher.video(self.video_id, nauthsig=sig, nauth=token)
 
